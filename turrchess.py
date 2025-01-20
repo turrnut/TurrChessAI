@@ -12,6 +12,7 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import json
 import numpy as np
+import random
 from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import LSTM, Dense, Embedding
 from tensorflow.keras.optimizers import Adam
@@ -45,13 +46,17 @@ def predict_next_piece(model, moves):
     prediction = model.predict(padded_input)
     sorted_pieces = np.argsort(prediction[0])[::-1]
 
+    possible = []
+
     for piece_index in sorted_pieces:
         piece_type = index_to_piece[piece_index]
         for move in board.legal_moves:
             if board.piece_at(move.from_square) and board.piece_at(move.from_square).symbol().upper() == piece_type:
-                return board.san(move)
+                possible.append(board.san(move))
 
-    return None
+    if len(possible) == 0:
+        return None
+    return random.Random().choice(seq=possible)
 
 def pvp():
     board = chess.Board()

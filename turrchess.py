@@ -1,66 +1,30 @@
-# P0
-# N1
-# B2
-# R3
-# Q4
-# K5
-# O6
-# todo : go back a move
-import chess
-import pandas
-import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-import json
-import numpy as np
-import random
-from tensorflow.keras.models import Sequential, load_model
-from tensorflow.keras.layers import LSTM, Dense, Embedding
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.preprocessing.sequence import pad_sequences
-from tensorflow.keras.callbacks import ModelCheckpoint
 
+import chess
+import random
 
 board = chess.Board()
 
-# Define the mapping from index to chess piece type
-index_to_piece = {
-    0: 'P',  # Pawn
-    1: 'N',  # Knight
-    2: 'B',  # Bishop
-    3: 'R',  # Rook
-    4: 'Q',  # Queen
-    5: 'K',  # King
-    6: 'O',  # Special case for Castling
-}
+moves = []
 
-def predict_next_piece(model, moves):
-    board.reset()
-    for move in moves:
+def makeMove(move):
+    if move == "": return False
+
+    if move in [board.san(m) for m in board.legal_moves]:
+        moves.append(move)
         board.push_san(move)
+        return True
+    else:
+        print("Illegal Move, try again.")
+        return False
 
-    move_indices = [board.piece_at(move.from_square).piece_type - 1 for move in board.legal_moves if board.piece_at(move.from_square)]
-
-    # Pad the sequence to match the expected input length of 348
-    padded_input = pad_sequences([move_indices], maxlen=348, padding='post')
-    
-    prediction = model.predict(padded_input)
-    sorted_pieces = np.argsort(prediction[0])[::-1]
-
-    possible = []
-
-    for piece_index in sorted_pieces:
-        piece_type = index_to_piece[piece_index]
-        for move in board.legal_moves:
-            if board.piece_at(move.from_square) and board.piece_at(move.from_square).symbol().upper() == piece_type:
-                possible.append(board.san(move))
-
-    if len(possible) == 0:
-        return None
-    return random.Random().choice(seq=possible)
-
-def pvp():
+def newBoard():
+    global moves
+    global board
     board = chess.Board()
     moves = []
+
+def pvp():
+    newBoard()
     print("Enter \'quit\' to exit")
     print("Enter \'display\' to display board")
     while not board.is_game_over():
@@ -74,51 +38,143 @@ def pvp():
                 print(board)
                 continue
 
-            if move in [board.san(m) for m in board.legal_moves]:
-                moves.append(move)
-                board.push_san(move)
-            else:
-                print("Illegal Move, try again.")
-                continue
+            makeMove(move)
         except ValueError:
             print("Invalid move format or illegal move, please try again.")
-    print("Game over", board.result())
+    print("Game over", board.result(), "\n", moves)
 
-def vcomputer(model):
-    board = chess.Board()
-    moves = []
+# square to coords
+def stc(square):
+    file = square % 8     # 0 = a, 7 = h
+    rank = square // 8    # 0 = rank 1, 7 = rank 8
+    return file, rank
+
+myMove = ""
+def evaluate():
+    global board
+    if board.is_checkmate():
+        return -99999 if board.turn else 99999
+
+    material = 0
+
+    i = 0
+    while i < 64:
+        piece = board.piece_at(i)
+        if piece is not None:
+            colorMul = 1 if piece.__str__().isupper() else -1
+            if piece.__str__() in "Pp": material += colorMul * 10
+            if piece.__str__() in "Nn": material += colorMul * 30
+            if piece.__str__() in "Bb": material += colorMul * 30
+            if piece.__str__() in "Rr": material += colorMul * 50
+            if piece.__str__() in "Qq": material += colorMul * 90
+            if piece.__str__() in "Kk": material += colorMul * 900
+        file, rank = stc(i)
+
+        if piece.__str__() in "Pp":
+            if file >= 3 and file <= 4 and rank >= 3 and rank <= 4:
+                material += 2 * colorMul
+        elif piece.__str__() in "Nn":
+            if file >= 2 and file <= 5 and rank >= 2 and rank <= 5:
+                material += 2 * colorMul
+        i += 1
+    return material
+
+movesChecked = 0
+def minimax(depth, alpha, beta, isMaxing):
+    global board
+    global myMove
+    global movesChecked
+    possible_moves = [board.san(m) for m in board.legal_moves]
+
+    if depth == 0 or len(possible_moves) == 0:
+        return evaluate()
+    
+    
+    bestEval = -99999 if isMaxing else 99999
+    # ???!!
+    bestMove = possible_moves[0]
+
+    for m in possible_moves:
+        board.push_san(m)
+        evaluation = minimax(depth-1, alpha, beta, not isMaxing)
+        movesChecked += 1
+        print("Moves checked:", movesChecked, end="\r", flush=True)
+        board.pop()
+        if (isMaxing and (evaluation > bestEval)) or (not isMaxing and (evaluation < bestEval)):
+            bestEval = evaluation
+            bestMove = m 
+        if isMaxing:
+            alpha = max(alpha, evaluation)
+            if beta <= alpha:
+                break
+        else:
+            beta = min(beta, evaluation)
+            if beta <= alpha:
+                break
+
+
+    myMove = bestMove
+    return bestEval
+
+def think(playingAsWhite, depth):
+    global board
+    global myMove
+
+    minimax(depth, -99999, 99999, playingAsWhite)
+
+    return myMove
+
+def vcomputer():
+    global movesChecked
+    newBoard()
+
+    # the color the computer is playing as
+    playingAsWhite = True
+
+    depth = 4
+    while True:
+        try:
+            depthi = input("Depth(leave blank for default)")
+            if not bool(depthi.strip()):
+                break
+            depth = int(depthi)
+            break
+        except ValueError:
+            print("Please enter a number.")
+
+    color = input("play as white or black? (enter w/b)")
+    if color.lower() == "w":
+        playingAsWhite = False
+        while True:
+            move = input("Enter first move:")
+            startPlaying = makeMove(move)
+            if startPlaying: break
+
     print("Enter \'quit\' to exit")
     print("Enter \'display\' to display board")
     while not board.is_game_over():
-        print("========================")
-        # try:
-        move = input("Move: ")
-        if move.lower() == "quit":
-            print("Game terminated")
-            break
-        elif move.lower() == "display":
-            print(board)
-            continue
-
-        if move in [board.san(m) for m in board.legal_moves]:
-            moves.append(move)
-            board.push_san(move)
-            ai_move = predict_next_piece(model, moves)
-            if ai_move == None:
-                break
-            moves.append(ai_move)
-            board.push_san(ai_move)
-            print(f"{move} AI did:", ai_move)
-        else:
-            print("Illegal Move, try again.")
-            continue
-        # except ValueError as e:
-        #     print(e)
-        #     print("Invalid move format or illegal move, please try again.")
-    print("Game over", board.result())
+        try:
+            if (playingAsWhite and (board.turn == chess.WHITE)) or (not playingAsWhite and (board.turn == chess.BLACK)):
+                if playingAsWhite: print("========================")
+                AI_move = think(playingAsWhite, depth)
+                makeMove(AI_move)
+                print(f"-> {AI_move}  Moves checked:{movesChecked}")
+                movesChecked = 0
+            else:
+                if not playingAsWhite: print("========================")
+                move = input("Move: ")
+                if move.lower() == "quit":
+                    print("Game terminated")
+                    break
+                elif move.lower() == "display":
+                    print(board)
+                    continue
+                makeMove(move)
+        except ValueError:
+            print("Invalid move format or illegal move, please try again.")
+    print("Game over", board.result(), "\n", moves)
 
 def mainloop():
-    model = load_model('chess.h5')
     print("===Welcome to TurrChess!===")
     while True:
         print("1 - player vs player\n2 - player vs computer\n3 - exit")
@@ -130,7 +186,7 @@ def mainloop():
             pvp()
             print("=======================")
         elif option == "2":
-            vcomputer(model)
+            vcomputer()
             print("=======================")
         elif option == "3":
             break
@@ -139,53 +195,3 @@ def mainloop():
             continue
 
 mainloop()
-##########################################
-##########################################
-##########################################
-##########################################
-##########################################
-##########################################
-##########################################
-##########################################
-# # TRAINING
-
-# MODEL_PATH = 'chess.h5'
-
-# # Step 1: Load and prepare the data
-# with open('data\chess\Trainable.json', 'r') as file:
-#     training_data = json.load(file)
-
-# # Convert training data to numpy arrays for use with Keras
-# X = [np.array(sequence[0]) for sequence in training_data]
-# y = [np.array(sequence[1]) for sequence in training_data]
-
-# # Padding sequences to ensure they are all the same length
-# from tensorflow.keras.preprocessing.sequence import pad_sequences
-# max_sequence_len = max(len(x) for x in X)
-# X_padded = pad_sequences(X, maxlen=max_sequence_len, padding='post')
-
-# # Step 2: Define the model
-# model = Sequential([
-#     Embedding(input_dim=7, output_dim=10, input_length=max_sequence_len),  # Embedding layer
-#     LSTM(64),  # LSTM layer with 64 units
-#     Dense(7, activation='softmax')  # Output layer with softmax
-# ])
-# model = load_model('chess.h5')
-
-# # Compile the model
-# model.compile(optimizer=Adam(learning_rate=0.01), loss='categorical_crossentropy', metrics=['accuracy'])
-
-# # Set up the ModelCheckpoint callback to save the model after each epoch
-# checkpoint_callback = ModelCheckpoint(
-#     filepath='chess.h5',
-#     save_freq='epoch',  # 'save_freq' set to 'epoch' saves the model after each epoch
-#     save_best_only=False,  # Set to True to save only the best model according to the validation loss
-#     save_weights_only=False,  # Set to True to save only the weights
-#     verbose=1  # Verbosity mode, 1 means that it will print messages when saving the model
-# )
-
-# # Step 3: Train the model
-# model.fit(X_padded, np.array(y), epochs=50, batch_size=32, callbacks=[checkpoint_callback])
-
-
-# print("Model training complete and saved.")
